@@ -22,8 +22,7 @@ Author: Stumpii
 class OCR:
     def __init__(self, screen, language: str = 'en'):
         self.screen = screen
-        self.paddleocr = PaddleOCR(use_angle_cls=True, lang=language, use_gpu=False, show_log=False, use_dilation=True,
-                                   use_space_char=True)
+        self.paddleocr = PaddleOCR(lang=language, use_doc_orientation_classify=True, use_textline_orientation=True)
         # Class for text similarity metrics
         self.jarowinkler = JaroWinkler()
         self.sorensendice = SorensenDice()
