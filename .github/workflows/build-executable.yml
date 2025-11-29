@@ -117,6 +117,36 @@ jobs:
           exit 1
         }
 
+    - name: Copy missing paddlex version file
+      run: |
+        # Find the paddlex package location and copy the .version file
+        $paddlexPath = python -c "import paddlex; import os; print(os.path.dirname(paddlex.__file__))"
+        $versionFile = Join-Path $paddlexPath ".version"
+        $destDir = ".\dist\EDAP-Autopilot\_internal\paddlex"
+        
+        echo "Paddlex source path: $paddlexPath"
+        echo "Version file: $versionFile"
+        echo "Destination: $destDir"
+        
+        # Create destination directory if it doesn't exist
+        if (-not (Test-Path $destDir)) {
+          New-Item -ItemType Directory -Path $destDir -Force
+        }
+        
+        # Copy the .version file
+        if (Test-Path $versionFile) {
+          Copy-Item $versionFile -Destination $destDir -Force
+          echo "Successfully copied .version file"
+        } else {
+          echo "Warning: .version file not found at $versionFile"
+          # Create the .version file with the installed version
+          $version = python -c "import paddlex; print(paddlex.__version__)" 2>$null
+          if ($version) {
+            echo $version > "$destDir\.version"
+            echo "Created .version file with version: $version"
+          }
+        }
+
     - name: Check build with Windows Defender
       continue-on-error: true
       run: |
