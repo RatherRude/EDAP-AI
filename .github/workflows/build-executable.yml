@@ -77,6 +77,25 @@ jobs:
         echo "Recursive listing of all directories:"
         Get-ChildItem -Path . -Directory -Recurse | Select-Object FullName
 
+    - name: Prepare paddlex version file
+      run: |
+        # Get paddlex version from pip and create .version file
+        $version = (pip show paddlex | Select-String "^Version:").ToString().Split(":")[1].Trim()
+        echo "Paddlex version: $version"
+        
+        # Find paddlex location and ensure .version exists there
+        $paddlexPath = python -c "import importlib.util; spec = importlib.util.find_spec('paddlex'); print(spec.submodule_search_locations[0] if spec else '')"
+        $versionFile = Join-Path $paddlexPath ".version"
+        
+        # Create the .version file in the source package if it doesn't exist
+        if (-not (Test-Path $versionFile)) {
+          Set-Content -Path $versionFile -Value $version -NoNewline
+          echo "Created .version file at: $versionFile"
+        } else {
+          echo ".version file already exists at: $versionFile"
+        }
+        Get-Content $versionFile
+
     - name: Build executable
       run: |
         # Create a default config.json if it doesn't exist
@@ -88,6 +107,10 @@ jobs:
         $buildDate = Get-Date -Format "yyyy-MM-dd"
         echo "Build date: $buildDate" > build_info.txt
         
+        # Get paddlex path for explicit data inclusion
+        $paddlexPath = python -c "import importlib.util; spec = importlib.util.find_spec('paddlex'); print(spec.submodule_search_locations[0] if spec else '')"
+        $versionFile = Join-Path $paddlexPath ".version"
+        
         # Run PyInstaller with options to reduce false positives
         # Using --onedir instead of --onefile significantly reduces false positives
         pyinstaller --onedir --windowed --icon="screen\edap.ico" `
@@ -96,6 +119,7 @@ jobs:
           --add-data "*.py;." `
           --add-data "build_info.txt;." `
           --add-data "config.json;." `
+          --add-data "${versionFile};paddlex" `
           --collect-data "paddle" `
           --collect-all "paddleocr" `
           --collect-all "paddlex" `
@@ -117,44 +141,26 @@ jobs:
           exit 1
         }
 
-    - name: Copy missing paddlex version file
+    - name: Verify paddlex version file
       run: |
-        # Get paddlex version from pip (avoids import issues)
-        $version = (pip show paddlex | Select-String "^Version:").ToString().Split(":")[1].Trim()
-        echo "Paddlex version from pip: $version"
+        $destFile = ".\dist\EDAP-Autopilot\_internal\paddlex\.version"
         
-        # Find the paddlex package source location
-        $paddlexPath = python -c "import importlib.util; spec = importlib.util.find_spec('paddlex'); print(spec.submodule_search_locations[0] if spec else '')"
-        echo "Paddlex source path: $paddlexPath"
-        
-        $destDir = ".\dist\EDAP-Autopilot\_internal\paddlex"
-        echo "Destination: $destDir"
-        
-        # Create destination directory if it doesn't exist
-        if (-not (Test-Path $destDir)) {
-          New-Item -ItemType Directory -Path $destDir -Force
-          echo "Created directory: $destDir"
-        }
-        
-        # Try to copy the .version file from source
-        $sourceVersionFile = Join-Path $paddlexPath ".version"
-        if (Test-Path $sourceVersionFile) {
-          Copy-Item $sourceVersionFile -Destination $destDir -Force
-          echo "Copied .version file from source"
-        } else {
-          # Create the .version file with the pip version
-          Set-Content -Path "$destDir\.version" -Value $version -NoNewline
-          echo "Created .version file with version: $version"
-        }
-        
-        # Verify the file exists
-        $destFile = "$destDir\.version"
+        # Check if file was included by PyInstaller
         if (Test-Path $destFile) {
           echo "Verified: .version file exists at $destFile"
           Get-Content $destFile
         } else {
-          echo "ERROR: .version file was not created!"
-          exit 1
+          # Fallback: create the file manually
+          echo "Warning: .version file not found, creating manually..."
+          $destDir = ".\dist\EDAP-Autopilot\_internal\paddlex"
+          
+          if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force
+          }
+          
+          $version = (pip show paddlex | Select-String "^Version:").ToString().Split(":")[1].Trim()
+          Set-Content -Path $destFile -Value $version -NoNewline
+          echo "Created .version file with version: $version"
         }
 
     - name: Check build with Windows Defender
