@@ -119,32 +119,42 @@ jobs:
 
     - name: Copy missing paddlex version file
       run: |
-        # Find the paddlex package location and copy the .version file
-        $paddlexPath = python -c "import paddlex; import os; print(os.path.dirname(paddlex.__file__))"
-        $versionFile = Join-Path $paddlexPath ".version"
-        $destDir = ".\dist\EDAP-Autopilot\_internal\paddlex"
+        # Get paddlex version from pip (avoids import issues)
+        $version = (pip show paddlex | Select-String "^Version:").ToString().Split(":")[1].Trim()
+        echo "Paddlex version from pip: $version"
         
+        # Find the paddlex package source location
+        $paddlexPath = python -c "import importlib.util; spec = importlib.util.find_spec('paddlex'); print(spec.submodule_search_locations[0] if spec else '')"
         echo "Paddlex source path: $paddlexPath"
-        echo "Version file: $versionFile"
+        
+        $destDir = ".\dist\EDAP-Autopilot\_internal\paddlex"
         echo "Destination: $destDir"
         
         # Create destination directory if it doesn't exist
         if (-not (Test-Path $destDir)) {
           New-Item -ItemType Directory -Path $destDir -Force
+          echo "Created directory: $destDir"
         }
         
-        # Copy the .version file
-        if (Test-Path $versionFile) {
-          Copy-Item $versionFile -Destination $destDir -Force
-          echo "Successfully copied .version file"
+        # Try to copy the .version file from source
+        $sourceVersionFile = Join-Path $paddlexPath ".version"
+        if (Test-Path $sourceVersionFile) {
+          Copy-Item $sourceVersionFile -Destination $destDir -Force
+          echo "Copied .version file from source"
         } else {
-          echo "Warning: .version file not found at $versionFile"
-          # Create the .version file with the installed version
-          $version = python -c "import paddlex; print(paddlex.__version__)" 2>$null
-          if ($version) {
-            echo $version > "$destDir\.version"
-            echo "Created .version file with version: $version"
-          }
+          # Create the .version file with the pip version
+          Set-Content -Path "$destDir\.version" -Value $version -NoNewline
+          echo "Created .version file with version: $version"
+        }
+        
+        # Verify the file exists
+        $destFile = "$destDir\.version"
+        if (Test-Path $destFile) {
+          echo "Verified: .version file exists at $destFile"
+          Get-Content $destFile
+        } else {
+          echo "ERROR: .version file was not created!"
+          exit 1
         }
 
     - name: Check build with Windows Defender
