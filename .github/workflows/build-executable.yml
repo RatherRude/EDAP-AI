@@ -121,6 +121,10 @@ jobs:
         pyinstaller --onedir --windowed --icon="screen\edap.ico" `
           --add-data "screen\edap.ico;screen" `
           --add-data "screen\*.png;screen" `
+          --add-data "locales;locales" `
+          --add-data "templates;templates" `
+          --add-data "configs;configs" `
+          --add-data "waypoints;waypoints" `
           --add-data "*.py;." `
           --add-data "build_info.txt;." `
           --add-data "config.json;." `
