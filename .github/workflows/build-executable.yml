@@ -95,6 +95,11 @@ jobs:
           echo ".version file already exists at: $versionFile"
         }
         Get-Content $versionFile
+        
+        # Update the runtime hook with the actual version
+        $hookFile = "hooks\runtime_hook_paddlex.py"
+        (Get-Content $hookFile) -replace "f\.write\('.*'\)", "f.write('$version')" | Set-Content $hookFile
+        echo "Updated runtime hook with version: $version"
 
     - name: Build executable
       run: |
@@ -120,6 +125,7 @@ jobs:
           --add-data "build_info.txt;." `
           --add-data "config.json;." `
           --add-data "${versionFile};paddlex" `
+          --runtime-hook "hooks\runtime_hook_paddlex.py" `
           --collect-data "paddle" `
           --collect-all "paddleocr" `
           --collect-all "paddlex" `
@@ -141,27 +147,62 @@ jobs:
           exit 1
         }
 
-    - name: Verify paddlex version file
+    - name: Verify and fix paddlex version file
+      shell: python
       run: |
-        $destFile = ".\dist\EDAP-Autopilot\_internal\paddlex\.version"
+        import os
+        import subprocess
         
-        # Check if file was included by PyInstaller
-        if (Test-Path $destFile) {
-          echo "Verified: .version file exists at $destFile"
-          Get-Content $destFile
-        } else {
-          # Fallback: create the file manually
-          echo "Warning: .version file not found, creating manually..."
-          $destDir = ".\dist\EDAP-Autopilot\_internal\paddlex"
-          
-          if (-not (Test-Path $destDir)) {
-            New-Item -ItemType Directory -Path $destDir -Force
-          }
-          
-          $version = (pip show paddlex | Select-String "^Version:").ToString().Split(":")[1].Trim()
-          Set-Content -Path $destFile -Value $version -NoNewline
-          echo "Created .version file with version: $version"
-        }
+        dest_dir = r'.\dist\EDAP-Autopilot\_internal\paddlex'
+        dest_file = os.path.join(dest_dir, '.version')
+        
+        # Get version from pip
+        result = subprocess.run(['pip', 'show', 'paddlex'], capture_output=True, text=True)
+        version = '3.3.10'  # default
+        for line in result.stdout.split('\n'):
+            if line.startswith('Version:'):
+                version = line.split(':')[1].strip()
+                break
+        
+        print(f'Paddlex version: {version}')
+        
+        # Create directory
+        os.makedirs(dest_dir, exist_ok=True)
+        print(f'Directory exists: {os.path.exists(dest_dir)}')
+        
+        # List directory contents
+        print('=== _internal directory structure ===')
+        internal_dir = r'.\dist\EDAP-Autopilot\_internal'
+        if os.path.exists(internal_dir):
+            for item in sorted(os.listdir(internal_dir)):
+                if os.path.isdir(os.path.join(internal_dir, item)):
+                    print(f'  [DIR] {item}')
+        
+        # List paddlex directory contents
+        print('=== paddlex directory contents ===')
+        if os.path.exists(dest_dir):
+            for item in sorted(os.listdir(dest_dir)):
+                print(f'  {item}')
+        
+        # Create or verify .version file
+        if os.path.exists(dest_file):
+            print(f'.version file already exists')
+            with open(dest_file, 'r') as f:
+                print(f'Content: {f.read()}')
+        else:
+            print(f'Creating .version file...')
+            with open(dest_file, 'w', encoding='utf-8') as f:
+                f.write(version)
+            print(f'Created .version file with version: {version}')
+        
+        # Final verification
+        if os.path.exists(dest_file):
+            print(f'SUCCESS: .version file exists at {dest_file}')
+            with open(dest_file, 'r') as f:
+                print(f'Content: {f.read()}')
+        else:
+            print(f'ERROR: .version file was not created!')
+            exit(1)
 
     - name: Check build with Windows Defender
       continue-on-error: true
