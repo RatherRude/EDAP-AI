@@ -257,8 +257,8 @@ class OCR:
         @param region: The region to check in % (0.0 - 1.0).
         @param timeout: Time to wait for screen in seconds
         """
-        # Draw box around region
-        abs_rect = self.screen.screen_rect_to_abs(region['rect'])
+        # Draw box around region (use overlay coords which include crop offset)
+        abs_rect = self.screen.screen_rect_to_abs_overlay(region['rect'])
         if ap.debug_overlay:
             ap.overlay.overlay_rect1('wait_for_text', abs_rect, (0, 255, 0), 2)
             ap.overlay.overlay_paint()
