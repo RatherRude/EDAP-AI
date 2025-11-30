@@ -1,4 +1,6 @@
 import math
+import os
+import sys
 import traceback
 from enum import Enum
 from math import atan, degrees
@@ -6,6 +8,14 @@ import random
 from tkinter import messagebox
 
 import cv2
+
+
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and PyInstaller bundles."""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 
 from simple_localization import LocalizationManager
 
@@ -287,12 +297,12 @@ class EDAutopilot:
 
     # Loads the configuration file
     #
-    def read_config(self, fileName='./configs/AP.json'):
+    def read_config(self, fileName='configs/AP.json'):
         s = None
         try:
-            with open(fileName, "r") as fp:
+            with open(get_resource_path(fileName), "r") as fp:
                 s = json.load(fp)
-        except  Exception as e:
+        except Exception as e:
             logger.warning("EDAPGui.py read_config error :" + str(e))
 
         return s
@@ -300,20 +310,20 @@ class EDAutopilot:
     def update_config(self):
         self.write_config(self.config)
 
-    def write_config(self, data, fileName='./configs/AP.json'):
+    def write_config(self, data, fileName='configs/AP.json'):
         try:
-            with open(fileName, "w") as fp:
+            with open(get_resource_path(fileName), "w") as fp:
                 json.dump(data, fp, indent=4)
         except Exception as e:
             logger.warning("EDAPGui.py write_config error:" + str(e))
 
-    def read_ship_configs(self, filename='./configs/ship_configs.json'):
+    def read_ship_configs(self, filename='configs/ship_configs.json'):
         """ Read the user's ship configuration file."""
         s = None
         try:
-            with open(filename, "r") as fp:
+            with open(get_resource_path(filename), "r") as fp:
                 s = json.load(fp)
-        except  Exception as e:
+        except Exception as e:
             logger.warning("EDAPGui.py read_ship_configs error :" + str(e))
 
         return s
@@ -336,10 +346,10 @@ class EDAutopilot:
             self.write_ship_configs(self.ship_configs)
             logger.debug(f"Saved ship config for: {self.current_ship_type}")
 
-    def write_ship_configs(self, data, filename='./configs/ship_configs.json'):
+    def write_ship_configs(self, data, filename='configs/ship_configs.json'):
         """ Write the user's ship configuration file."""
         try:
-            with open(filename, "w") as fp:
+            with open(get_resource_path(filename), "w") as fp:
                 json.dump(data, fp, indent=4)
         except Exception as e:
             logger.warning("EDAPGui.py write_ship_configs error:" + str(e))
