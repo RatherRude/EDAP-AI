@@ -1,8 +1,33 @@
 from __future__ import annotations
 
+import os
+import sys
 import time
 import cv2
 import numpy as np
+
+
+# Patch paddlex dependency checker BEFORE importing PaddleOCR
+# This is needed for PyInstaller bundles where the runtime dep check fails
+def _patch_paddlex_deps():
+    """Patch paddlex to skip dependency checks in PyInstaller bundle."""
+    if hasattr(sys, '_MEIPASS'):
+        try:
+            # Import the deps module and patch require_extra
+            import paddlex.utils.deps as deps_module
+            original_require_extra = deps_module.require_extra
+
+            def patched_require_extra(*args, **kwargs):
+                """Skip dependency check in PyInstaller bundle."""
+                pass
+
+            deps_module.require_extra = patched_require_extra
+        except Exception:
+            pass  # If it fails, continue anyway
+
+
+_patch_paddlex_deps()
+
 from paddleocr import PaddleOCR
 from strsimpy import SorensenDice
 from strsimpy.jaro_winkler import JaroWinkler
@@ -33,7 +58,7 @@ class OCR:
         @param s2: The second string to compare.
         @return: The similarity from 0.0 (no match) to 1.0 (identical).
         """
-        #return self.jarowinkler.similarity(s1, s2)
+        # return self.jarowinkler.similarity(s1, s2)
         return self.sorensendice.similarity(s1, s2)
 
     def image_ocr(self, image):
@@ -57,7 +82,7 @@ class OCR:
                 for line in res:
                     ocr_textlist.append(line[1][0])
 
-            #print(ocr_textlist)
+            # print(ocr_textlist)
             return ocr_data, ocr_textlist
 
     def image_simple_ocr(self, image) -> list[str] | None:

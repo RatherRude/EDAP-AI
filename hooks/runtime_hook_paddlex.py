@@ -1,5 +1,7 @@
 # PyInstaller runtime hook for paddlex
-# This hook creates the .version file before paddlex is imported
+# This hook:
+# 1. Creates the .version file before paddlex is imported
+# 2. Patches the dependency checker to skip runtime checks
 # Must run BEFORE paddlex/__init__.py tries to read .version
 
 import os
@@ -36,9 +38,33 @@ def ensure_paddlex_version():
             print(f"Runtime hook: Created {version_file} with version {version}")
         except Exception as e:
             print(f"Warning: Could not create .version file: {e}")
-    else:
-        print(f"Runtime hook: {version_file} already exists")
+
+
+def patch_paddlex_dependency_check():
+    """Patch paddlex to skip dependency checks in PyInstaller bundle."""
+    if not hasattr(sys, '_MEIPASS'):
+        return  # Only patch in PyInstaller bundle
+
+    # Set environment variable to signal we're in a bundled app
+    os.environ['PADDLEX_SKIP_DEPS_CHECK'] = '1'
+
+    # Monkey-patch the require_extra function to do nothing
+    try:
+        import paddlex.utils.deps as deps_module
+
+        def patched_require_extra(*args, **kwargs):
+            """Patched version that does nothing - deps are bundled."""
+            pass
+
+        deps_module.require_extra = patched_require_extra
+        print("Runtime hook: Patched paddlex dependency checker")
+    except ImportError:
+        # paddlex.utils.deps might not exist yet, we'll patch it later
+        pass
+    except Exception as e:
+        print(f"Warning: Could not patch paddlex deps: {e}")
 
 
 # Run immediately when this hook is loaded (before other imports)
 ensure_paddlex_version()
+patch_paddlex_dependency_check()

@@ -163,13 +163,17 @@ jobs:
           exit 1
         }
 
-    - name: Verify and fix paddlex version file
+    - name: Verify and fix bundle files
       shell: python
       run: |
         import os
         import subprocess
+        import shutil
         
-        dest_dir = r'.\dist\EDAP-Autopilot\_internal\paddlex'
+        internal_dir = r'.\dist\EDAP-Autopilot\_internal'
+        
+        # === Verify and fix paddlex version file ===
+        dest_dir = os.path.join(internal_dir, 'paddlex')
         dest_file = os.path.join(dest_dir, '.version')
         
         # Get version from pip
@@ -184,15 +188,44 @@ jobs:
         
         # Create directory
         os.makedirs(dest_dir, exist_ok=True)
-        print(f'Directory exists: {os.path.exists(dest_dir)}')
+        print(f'Paddlex directory exists: {os.path.exists(dest_dir)}')
         
         # List directory contents
         print('=== _internal directory structure ===')
-        internal_dir = r'.\dist\EDAP-Autopilot\_internal'
         if os.path.exists(internal_dir):
             for item in sorted(os.listdir(internal_dir)):
-                if os.path.isdir(os.path.join(internal_dir, item)):
+                item_path = os.path.join(internal_dir, item)
+                if os.path.isdir(item_path):
                     print(f'  [DIR] {item}')
+        
+        # === Verify configs directory ===
+        configs_dir = os.path.join(internal_dir, 'configs')
+        print(f'\n=== Checking configs directory: {configs_dir} ===')
+        if os.path.exists(configs_dir):
+            print('configs directory exists!')
+            for f in os.listdir(configs_dir):
+                print(f'  - {f}')
+        else:
+            print('WARNING: configs directory NOT found! Copying from source...')
+            src_configs = 'configs'
+            if os.path.exists(src_configs):
+                shutil.copytree(src_configs, configs_dir)
+                print('Copied configs directory')
+            else:
+                print('ERROR: Source configs directory not found!')
+        
+        # === Verify other directories ===
+        for dir_name in ['locales', 'templates', 'waypoints', 'screen']:
+            dir_path = os.path.join(internal_dir, dir_name)
+            print(f'\n=== Checking {dir_name} directory ===')
+            if os.path.exists(dir_path):
+                files = os.listdir(dir_path)
+                print(f'{dir_name} exists with {len(files)} files')
+            else:
+                print(f'WARNING: {dir_name} NOT found! Copying from source...')
+                if os.path.exists(dir_name):
+                    shutil.copytree(dir_name, dir_path)
+                    print(f'Copied {dir_name} directory')
         
         # List paddlex directory contents
         print('=== paddlex directory contents ===')
