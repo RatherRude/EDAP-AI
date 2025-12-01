@@ -6,27 +6,10 @@ import time
 import cv2
 import numpy as np
 
-
-# Patch paddlex dependency checker BEFORE importing PaddleOCR
-# This is needed for PyInstaller bundles where the runtime dep check fails
-def _patch_paddlex_deps():
-    """Patch paddlex to skip dependency checks in PyInstaller bundle."""
-    if hasattr(sys, '_MEIPASS'):
-        try:
-            # Import the deps module and patch require_extra
-            import paddlex.utils.deps as deps_module
-            original_require_extra = deps_module.require_extra
-
-            def patched_require_extra(*args, **kwargs):
-                """Skip dependency check in PyInstaller bundle."""
-                pass
-
-            deps_module.require_extra = patched_require_extra
-        except Exception:
-            pass  # If it fails, continue anyway
-
-
-_patch_paddlex_deps()
+# Note: PaddleX dependency patching is handled by the runtime hook
+# (hooks/runtime_hook_paddlex.py) which runs before any imports.
+# The runtime hook injects a fake paddlex.utils.deps module into sys.modules
+# to prevent DependencyError when running as a PyInstaller bundle.
 
 from paddleocr import PaddleOCR
 from strsimpy import SorensenDice

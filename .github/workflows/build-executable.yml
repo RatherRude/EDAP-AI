@@ -134,6 +134,7 @@ jobs:
           --add-data "config.json;." `
           --add-data "${versionFile};paddlex" `
           --runtime-hook "hooks\runtime_hook_paddlex.py" `
+          --additional-hooks-dir "hooks" `
           --collect-data "paddle" `
           --collect-all "paddleocr" `
           --collect-all "paddlex" `
@@ -145,6 +146,10 @@ jobs:
           --hidden-import=pyclipper `
           --hidden-import=shapely `
           --hidden-import=shapely.geometry `
+          --hidden-import=paddlex `
+          --hidden-import=paddlex.utils `
+          --hidden-import=paddlex.utils.deps `
+          --hidden-import=paddlex.inference `
           --hidden-import=paddlex.inference.pipelines `
           --hidden-import=paddlex.inference.pipelines.ocr `
           --hidden-import=paddlex.modules `
@@ -162,6 +167,11 @@ jobs:
           echo "Build failed or file not found at expected location"
           exit 1
         }
+
+    - name: Patch PaddleX dependency checks in bundle
+      run: |
+        # Run the post-build patch script to disable paddlex dependency checks
+        python hooks/patch_paddlex_bundle.py ".\dist\EDAP-Autopilot"
 
     - name: Verify and fix bundle files
       shell: python
@@ -252,6 +262,19 @@ jobs:
         else:
             print(f'ERROR: .version file was not created!')
             exit(1)
+        
+        # === Verify paddlex deps patch was applied ===
+        deps_file = os.path.join(dest_dir, 'utils', 'deps.py')
+        print(f'\n=== Checking paddlex deps patch ===')
+        if os.path.exists(deps_file):
+            with open(deps_file, 'r') as f:
+                content = f.read()
+                if 'PATCHED' in content or 'No-op' in content or 'Stub module' in content:
+                    print('SUCCESS: paddlex deps module is patched')
+                else:
+                    print('WARNING: paddlex deps module may not be patched correctly')
+        else:
+            print(f'deps.py not found at expected location: {deps_file}')
 
     - name: Check build with Windows Defender
       continue-on-error: true
