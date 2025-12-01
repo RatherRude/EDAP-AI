@@ -69,7 +69,7 @@ def setup_import_hook():
             """Patch the deps module to skip dependency checks."""
             def patched_require_extra(*args, **kwargs):
                 """No-op: Dependencies are bundled."""
-                pass
+                return None  # Never raise DependencyError
 
             module.require_extra = patched_require_extra
             
@@ -80,6 +80,24 @@ def setup_import_hook():
                 module.is_dep_available = lambda *a, **kw: True
             if hasattr(module, 'ensure_deps'):
                 module.ensure_deps = lambda *a, **kw: None
+            
+            # Patch _wrapper if it exists - this is the decorator that calls require_extra
+            if hasattr(module, '_wrapper'):
+                original_wrapper = module._wrapper
+                def patched_wrapper(*args, **kwargs):
+                    """Patched wrapper that catches DependencyError."""
+                    try:
+                        return original_wrapper(*args, **kwargs)
+                    except Exception as e:
+                        # Check if it's a DependencyError
+                        error_type = type(e).__name__
+                        error_msg = str(e)
+                        if 'DependencyError' in error_type or 'requires additional dependencies' in error_msg:
+                            # Silently ignore - dependencies are bundled
+                            return None
+                        raise
+                module._wrapper = patched_wrapper
+                print("Runtime hook: Patched _wrapper function")
         
         def _create_stub_module(self, fullname):
             """Create a stub module if the real one can't be imported."""

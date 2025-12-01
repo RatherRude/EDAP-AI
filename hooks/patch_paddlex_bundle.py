@@ -39,6 +39,7 @@ def find_deps_module(internal_dir: Path) -> Path | None:
 def patch_deps_file(deps_path: Path) -> bool:
     """
     Patch the deps.py file to make require_extra a no-op.
+    Uses a comprehensive approach that replaces function bodies and adds overrides.
     """
     print(f"Patching {deps_path}")
     
@@ -46,104 +47,148 @@ def patch_deps_file(deps_path: Path) -> bool:
         content = deps_path.read_text(encoding='utf-8')
         original_content = content
         
-        # Pattern 1: Replace the require_extra function definition
-        # This handles various forms of the function
-        patterns = [
-            # Match: def require_extra(...): with body
-            (
-                r'def require_extra\s*\([^)]*\)\s*:.*?(?=\ndef |\nclass |\Z)',
-                '''def require_extra(*args, **kwargs):
-    """Patched: Skip dependency check in PyInstaller bundle."""
-    pass
-
-'''
-            ),
-            # Match: def check_deps(...): with body
-            (
-                r'def check_deps\s*\([^)]*\)\s*:.*?(?=\ndef |\nclass |\Z)',
-                '''def check_deps(*args, **kwargs):
-    """Patched: Skip dependency check in PyInstaller bundle."""
-    pass
-
-'''
-            ),
-        ]
-        
-        for pattern, replacement in patterns:
-            content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-        
-        # If content changed, write it back
-        if content != original_content:
-            deps_path.write_text(content, encoding='utf-8')
-            print(f"Successfully patched {deps_path}")
-            return True
-        else:
-            print(f"No patterns matched in {deps_path}, trying alternative approach")
-            return patch_deps_file_alternative(deps_path)
-            
-    except Exception as e:
-        print(f"Error patching {deps_path}: {e}")
-        return False
-
-
-def patch_deps_file_alternative(deps_path: Path) -> bool:
-    """
-    Alternative patching approach: prepend a monkey-patch at the start of the file.
-    """
-    try:
-        content = deps_path.read_text(encoding='utf-8')
-        
         # Check if already patched
         if '# PATCHED_FOR_PYINSTALLER' in content:
             print(f"File already patched: {deps_path}")
             return True
         
-        # Prepend our patch
-        patch_code = '''# PATCHED_FOR_PYINSTALLER
-# This file has been patched to skip dependency checks in PyInstaller bundles
-import sys as _sys
+        # Strategy: Replace function bodies with pass statements
+        # Match function definitions with their entire bodies (until next def/class or end of file)
+        
+        # Pattern 1: Replace require_extra function body
+        # This matches: def require_extra(...): ... everything until next def/class/end
+        require_extra_pattern = r'(def require_extra\s*\([^)]*\)\s*:)(.*?)(?=\n\s*(?:def |class |@|\Z))'
+        
+        def replace_require_extra(match):
+            func_def = match.group(1)
+            return f"{func_def}\n    \"\"\"Patched: Skip dependency check in PyInstaller bundle.\"\"\"\n    return  # Skip check in bundle\n"
+        
+        content = re.sub(require_extra_pattern, replace_require_extra, content, flags=re.DOTALL)
+        
+        # Pattern 2: Replace check_deps function body
+        check_deps_pattern = r'(def check_deps\s*\([^)]*\)\s*:)(.*?)(?=\n\s*(?:def |class |@|\Z))'
+        
+        def replace_check_deps(match):
+            func_def = match.group(1)
+            return f"{func_def}\n    \"\"\"Patched: Skip dependency check in PyInstaller bundle.\"\"\"\n    return  # Skip check in bundle\n"
+        
+        content = re.sub(check_deps_pattern, replace_check_deps, content, flags=re.DOTALL)
+        
+        # Pattern 3: Replace _wrapper function if it exists (this is the decorator that calls require_extra)
+        wrapper_pattern = r'(def _wrapper\s*\([^)]*\)\s*:)(.*?)(?=\n\s*(?:def |class |@|\Z))'
+        
+        def replace_wrapper(match):
+            func_def = match.group(1)
+            # Keep the wrapper structure but make require_extra call a no-op
+            wrapper_body = match.group(2)
+            # Replace any calls to require_extra with pass
+            wrapper_body = re.sub(r'require_extra\([^)]*\)', 'pass  # Patched: skip dep check', wrapper_body)
+            return f"{func_def}{wrapper_body}"
+        
+        content = re.sub(wrapper_pattern, replace_wrapper, content, flags=re.DOTALL)
+        
+        # Write regex changes if any were made
+        if content != original_content:
+            deps_path.write_text(content, encoding='utf-8')
+            print(f"Applied regex patches to {deps_path}")
+        
+        # Always apply the comprehensive end-of-file override (most reliable method)
+        return patch_deps_file_alternative(deps_path)
+            
+    except Exception as e:
+        print(f"Error patching {deps_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-# Store original functions before they're defined
-_original_require_extra = None
-_original_check_deps = None
 
-def _patched_require_extra(*args, **kwargs):
-    """Patched: Skip dependency check in PyInstaller bundle."""
-    if hasattr(_sys, '_MEIPASS'):
-        return  # Skip in PyInstaller
-    if _original_require_extra:
-        return _original_require_extra(*args, **kwargs)
+def patch_deps_file_alternative(deps_path: Path) -> bool:
+    """
+    Alternative patching approach: append override code at the end of the file.
+    This is more reliable than regex replacement.
+    """
+    try:
+        content = deps_path.read_text(encoding='utf-8')
+        
+        # Check if already patched
+        if '# PATCHED_FOR_PYINSTALLER_OVERRIDE' in content:
+            print(f"File already patched: {deps_path}")
+            return True
+        
+        # Add comprehensive override at the end of the file
+        # This runs after all functions are defined, so it will override them
+        override_code = '''
 
-def _patched_check_deps(*args, **kwargs):
-    """Patched: Skip dependency check in PyInstaller bundle."""
-    if hasattr(_sys, '_MEIPASS'):
-        return  # Skip in PyInstaller
-    if _original_check_deps:
-        return _original_check_deps(*args, **kwargs)
+# ============================================================================
+# PATCHED_FOR_PYINSTALLER_OVERRIDE
+# This code overrides dependency checking functions to skip checks in bundles
+# ============================================================================
+import sys as _pyinstaller_sys_check
 
-# End of patch header
-
+if hasattr(_pyinstaller_sys_check, '_MEIPASS'):
+    # We're in a PyInstaller bundle - override all dependency check functions
+    
+    # Store original functions if they exist
+    _original_require_extra = globals().get('require_extra')
+    _original_check_deps = globals().get('check_deps')
+    _original_wrapper = globals().get('_wrapper')
+    
+    # Override require_extra to do nothing - never raise DependencyError
+    def require_extra(*args, **kwargs):
+        """Patched: Skip dependency check in PyInstaller bundle."""
+        # Do absolutely nothing - dependencies are bundled
+        return None
+    
+    # Override check_deps to do nothing
+    def check_deps(*args, **kwargs):
+        """Patched: Skip dependency check in PyInstaller bundle."""
+        return
+    
+    # Override _wrapper to catch and ignore DependencyError
+    # The wrapper calls require_extra, which we've patched, but we also catch errors as backup
+    if _original_wrapper is not None:
+        def _wrapper(*args, **kwargs):
+            """Patched wrapper that catches and ignores DependencyError."""
+            try:
+                return _original_wrapper(*args, **kwargs)
+            except DependencyError:
+                # Silently ignore - dependencies are bundled
+                return
+            except Exception as e:
+                # Check if it's a DependencyError by name or message
+                error_type = type(e).__name__
+                error_msg = str(e)
+                if 'DependencyError' in error_type or 'requires additional dependencies' in error_msg:
+                    # Silently ignore - dependencies are bundled
+                    return
+                # Re-raise other exceptions
+                raise
+        globals()['_wrapper'] = _wrapper
+    
+    # Also patch any other functions that might check dependencies
+    if 'is_dep_available' in globals():
+        def is_dep_available(*args, **kwargs):
+            """Always return True in bundle."""
+            return True
+        globals()['is_dep_available'] = is_dep_available
+    
+    # Make sure the overrides are in the module namespace
+    globals()['require_extra'] = require_extra
+    globals()['check_deps'] = check_deps
+    
+    print("PaddleX dependency checks disabled for PyInstaller bundle")
+# ============================================================================
 '''
         
-        content = patch_code + content
-        
-        # Also add at the end of the file to override the definitions
-        content += '''
-
-# PATCHED_FOR_PYINSTALLER: Override functions at module level
-import sys as _sys_check
-if hasattr(_sys_check, '_MEIPASS'):
-    require_extra = lambda *a, **kw: None
-    check_deps = lambda *a, **kw: None
-    is_dep_available = lambda *a, **kw: True
-'''
-        
+        content += override_code
         deps_path.write_text(content, encoding='utf-8')
-        print(f"Successfully patched {deps_path} using alternative approach")
+        print(f"Successfully patched {deps_path} using alternative approach (end-of-file override)")
         return True
         
     except Exception as e:
         print(f"Error in alternative patching {deps_path}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -281,6 +326,21 @@ def main():
         print(f"Found deps module: {deps_path}")
         if not patch_deps_file(deps_path):
             success = False
+        
+        # Verify the patch was applied
+        print(f"\nVerifying patch in {deps_path}...")
+        try:
+            patched_content = deps_path.read_text(encoding='utf-8')
+            if 'PATCHED_FOR_PYINSTALLER' in patched_content or 'PATCHED_FOR_PYINSTALLER_OVERRIDE' in patched_content:
+                print("✓ Patch verification: Override code found in file")
+            if 'def require_extra' in patched_content:
+                # Check if it's been patched
+                if 'return None' in patched_content or 'return  # Skip' in patched_content or 'PATCHED' in patched_content:
+                    print("✓ Patch verification: require_extra appears to be patched")
+                else:
+                    print("⚠ Warning: require_extra found but may not be fully patched")
+        except Exception as e:
+            print(f"⚠ Warning: Could not verify patch: {e}")
     else:
         print("deps.py not found, creating stub module")
         if not create_deps_stub(internal_dir):
