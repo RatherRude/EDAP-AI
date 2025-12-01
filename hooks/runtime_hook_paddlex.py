@@ -2,130 +2,105 @@
 # This hook MUST run BEFORE paddlex is imported anywhere
 #
 # Strategy:
-# 1. Inject a fake paddlex.utils.deps module into sys.modules BEFORE paddlex loads
+# 1. Use an import hook to intercept paddlex.utils.deps and patch it after loading
 # 2. Create the .version file for paddlex
 # 3. Set environment variables to signal we're in a bundled app
 #
-# This prevents the DependencyError: `OCR` requires additional dependencies
+# IMPORTANT: We must NOT inject fake parent modules (paddlex, paddlex.utils)
+# as this would prevent the real modules from loading!
 
 import os
 import sys
 import types
 
 
-def inject_fake_deps_module():
+def setup_import_hook():
     """
-    Inject a fake paddlex.utils.deps module that does nothing.
-    This MUST happen before any paddlex import.
+    Set up an import hook that patches paddlex.utils.deps when it's loaded.
+    This allows the real paddlex package to load normally, but patches
+    the dependency checker to skip runtime checks.
     """
     if not hasattr(sys, '_MEIPASS'):
         return  # Only needed in PyInstaller bundle
-
-    # Create a fake module with all the functions that paddlex.utils.deps provides
-    fake_deps = types.ModuleType('paddlex.utils.deps')
-
-    # Define no-op functions for all dependency-related functions
-    def require_extra(*args, **kwargs):
-        """No-op: Dependencies are bundled."""
-        pass
-
-    def check_deps(*args, **kwargs):
-        """No-op: Dependencies are bundled."""
-        pass
-
-    def is_dep_available(*args, **kwargs):
-        """Always return True: Dependencies are bundled."""
-        return True
-
-    def ensure_deps(*args, **kwargs):
-        """No-op: Dependencies are bundled."""
-        pass
-
-    # A fake DependencyError that never gets raised
-    class DependencyError(Exception):
-        pass
-
-    # Attach all functions/classes to the fake module
-    fake_deps.require_extra = require_extra
-    fake_deps.check_deps = check_deps
-    fake_deps.is_dep_available = is_dep_available
-    fake_deps.ensure_deps = ensure_deps
-    fake_deps.DependencyError = DependencyError
-
-    # Inject parent modules first (required for sub-module injection)
-    if 'paddlex' not in sys.modules:
-        fake_paddlex = types.ModuleType('paddlex')
-        fake_paddlex.__path__ = []  # Make it a package
-        sys.modules['paddlex'] = fake_paddlex
-
-    if 'paddlex.utils' not in sys.modules:
-        fake_utils = types.ModuleType('paddlex.utils')
-        fake_utils.__path__ = []  # Make it a package
-        sys.modules['paddlex.utils'] = fake_utils
-        # Attach to parent
-        sys.modules['paddlex'].utils = fake_utils
-
-    # Inject the fake deps module
-    sys.modules['paddlex.utils.deps'] = fake_deps
-    sys.modules['paddlex.utils'].deps = fake_deps
-
-    print("Runtime hook: Injected fake paddlex.utils.deps module")
-
-
-def setup_import_hook():
-    """
-    Set up an import hook that patches paddlex.utils.deps when it's actually loaded.
-    This is a backup in case the fake module gets overwritten.
-    """
-    if not hasattr(sys, '_MEIPASS'):
-        return
 
     class PaddlexDepsImportHook:
         """
         Import hook that patches paddlex.utils.deps after it loads.
         """
+        _patched = False
+        
         def find_module(self, fullname, path=None):
-            if fullname == 'paddlex.utils.deps':
+            # Intercept paddlex.utils.deps import
+            if fullname == 'paddlex.utils.deps' and not self._patched:
                 return self
             return None
 
         def load_module(self, fullname):
-            # If already in sys.modules, return it
-            if fullname in sys.modules:
+            # If already in sys.modules and patched, return it
+            if fullname in sys.modules and self._patched:
                 return sys.modules[fullname]
 
             # Remove this finder temporarily to allow normal import
-            sys.meta_path.remove(self)
+            if self in sys.meta_path:
+                sys.meta_path.remove(self)
+            
             try:
                 import importlib
                 module = importlib.import_module(fullname)
 
-                # Patch the module
-                def patched_require_extra(*args, **kwargs):
-                    pass
-
-                module.require_extra = patched_require_extra
-
-                # Also patch check_deps if it exists
-                if hasattr(module, 'check_deps'):
-                    module.check_deps = lambda *a, **kw: None
-                if hasattr(module, 'is_dep_available'):
-                    module.is_dep_available = lambda *a, **kw: True
-
-                print(f"Runtime hook: Patched {fullname} after real import")
+                # Patch the module functions
+                self._patch_module(module)
+                self._patched = True
+                
+                print(f"Runtime hook: Patched {fullname}")
                 return module
-            except ImportError:
-                # If import fails, return our fake module
-                inject_fake_deps_module()
-                return sys.modules.get(fullname)
+            except ImportError as e:
+                print(f"Runtime hook: Could not import {fullname}: {e}")
+                # Create a stub module if import fails
+                module = self._create_stub_module(fullname)
+                self._patched = True
+                return module
             finally:
-                # Re-add this finder
+                # Re-add this finder for any future imports
                 if self not in sys.meta_path:
                     sys.meta_path.insert(0, self)
+        
+        def _patch_module(self, module):
+            """Patch the deps module to skip dependency checks."""
+            def patched_require_extra(*args, **kwargs):
+                """No-op: Dependencies are bundled."""
+                pass
 
-    # Install the import hook
+            module.require_extra = patched_require_extra
+            
+            # Patch other functions if they exist
+            if hasattr(module, 'check_deps'):
+                module.check_deps = lambda *a, **kw: None
+            if hasattr(module, 'is_dep_available'):
+                module.is_dep_available = lambda *a, **kw: True
+            if hasattr(module, 'ensure_deps'):
+                module.ensure_deps = lambda *a, **kw: None
+        
+        def _create_stub_module(self, fullname):
+            """Create a stub module if the real one can't be imported."""
+            print(f"Runtime hook: Creating stub module for {fullname}")
+            
+            stub = types.ModuleType(fullname)
+            stub.require_extra = lambda *a, **kw: None
+            stub.check_deps = lambda *a, **kw: None
+            stub.is_dep_available = lambda *a, **kw: True
+            stub.ensure_deps = lambda *a, **kw: None
+            
+            class DependencyError(Exception):
+                pass
+            stub.DependencyError = DependencyError
+            
+            sys.modules[fullname] = stub
+            return stub
+
+    # Install the import hook at the start of meta_path
     sys.meta_path.insert(0, PaddlexDepsImportHook())
-    print("Runtime hook: Installed paddlex import hook")
+    print("Runtime hook: Installed paddlex.utils.deps import hook")
 
 
 def ensure_paddlex_version():
@@ -161,14 +136,12 @@ def set_environment_flags():
     if hasattr(sys, '_MEIPASS'):
         os.environ['PADDLEX_SKIP_DEPS_CHECK'] = '1'
         os.environ['PADDLEX_BUNDLED'] = '1'
-        # Some packages check for frozen state
         os.environ['PYINSTALLER_BUNDLED'] = '1'
 
 
 # Run all setup functions immediately when this hook is loaded
-# Order matters! Fake module injection must happen first.
+# Order matters!
 set_environment_flags()
-inject_fake_deps_module()
 setup_import_hook()
 ensure_paddlex_version()
 

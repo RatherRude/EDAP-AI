@@ -150,6 +150,8 @@ jobs:
           --hidden-import=paddlex.utils `
           --hidden-import=paddlex.utils.deps `
           --hidden-import=paddlex.inference `
+          --hidden-import=paddlex.inference.utils `
+          --hidden-import=paddlex.inference.utils.benchmark `
           --hidden-import=paddlex.inference.pipelines `
           --hidden-import=paddlex.inference.pipelines.ocr `
           --hidden-import=paddlex.modules `
